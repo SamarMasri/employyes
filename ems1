@@ -1,0 +1,427 @@
+import pymysql
+from tkinter import messagebox, ttk, END
+from customtkinter import *
+from PIL import Image
+import bcrypt
+from datetime import datetime
+import os
+import sys
+
+# Ensure the database functions are defined first
+def connect_database():
+    """Establishes a connection to the MySQL database and creates tables if they don't exist."""
+    global mycursor, conn
+    try:
+        conn = pymysql.connect(host='localhost', user='root', password='12345678')
+        mycursor = conn.cursor()
+    except Exception as e:
+        messagebox.showerror('Error', f'Something went wrong: {e}\nPlease ensure MySQL is running and the credentials are correct.')
+        return False
+
+    mycursor.execute('CREATE DATABASE IF NOT EXISTS employee_db')
+    mycursor.execute('USE employee_db')
+
+    mycursor.execute('''CREATE TABLE IF NOT EXISTS users (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        username VARCHAR(50) UNIQUE NOT NULL,
+        password VARCHAR(100) NOT NULL)''')
+
+    mycursor.execute('''CREATE TABLE IF NOT EXISTS employees (
+        Id VARCHAR(20) PRIMARY KEY,
+        Name VARCHAR(50),
+        Phone VARCHAR(15),
+        Role VARCHAR(50),
+        Gender VARCHAR(20),
+        Salary DECIMAL(10,2))''')
+
+    return True
+
+def insert_employee(id, name, phone, role, gender, salary):
+    mycursor.execute('INSERT INTO employees VALUES (%s,%s,%s,%s,%s,%s)', (id, name, phone, role, gender, salary))
+    conn.commit()
+
+def employee_id_exists(id):
+    mycursor.execute('SELECT COUNT(*) FROM employees WHERE Id=%s', (id,))
+    return mycursor.fetchone()[0] > 0
+
+def fetch_employees():
+    mycursor.execute('SELECT * FROM employees')
+    return mycursor.fetchall()
+
+def update_employee(id, new_name, new_phone, new_role, new_gender, new_salary):
+    mycursor.execute('''UPDATE employees SET Name=%s, Phone=%s, Role=%s, Gender=%s, Salary=%s WHERE Id=%s''', 
+                    (new_name, new_phone, new_role, new_gender, new_salary, id))
+    conn.commit()
+
+def delete_employee(id):
+    mycursor.execute('DELETE FROM employees WHERE Id=%s', (id,))
+    conn.commit()
+
+def search_employees(option, value):
+    sql = f"SELECT * FROM employees WHERE {option} LIKE %s"
+    mycursor.execute(sql, (f"%{value}%",))
+    return mycursor.fetchall()
+
+def delete_all_employees():
+    mycursor.execute('TRUNCATE TABLE employees')
+    conn.commit()
+
+def save_user(username, password):
+    hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    try:
+        mycursor.execute("INSERT INTO users (username, password) VALUES (%s,%s)", (username, hashed))
+        conn.commit()
+        return True
+    except Exception:
+        return False
+
+def verify_user(username, password):
+    mycursor.execute("SELECT password FROM users WHERE username=%s", (username,))
+    row = mycursor.fetchone()
+    if not row:
+        return False
+    stored_hash = row[0]
+    return bcrypt.checkpw(password.encode('utf-8'), stored_hash.encode('utf-8'))
+
+def user_exists(username):
+    mycursor.execute('SELECT COUNT(*) FROM users WHERE username=%s', (username,))
+    return mycursor.fetchone()[0] > 0
+
+# --- Main Application Classes ---
+class LoginScreen(CTkFrame):
+    def __init__(self, master, switch_callback):
+        super().__init__(master, fg_color='#FFFFFF')
+        self.switch_callback = switch_callback
+        
+        # Load and display the background image
+        if os.path.exists("cover.jpg"):
+            try:
+                self.bg_image = CTkImage(Image.open("cover.jpg"), size=(928, 487))
+                CTkLabel(self, image=self.bg_image, text='').place(x=0, y=0)
+            except Exception as e:
+                print("Error loading image:", e)
+        else:
+            self.configure(fg_color="#2E4053")
+
+        # Login elements
+        self.login_frame = CTkFrame(self, bg_color='#FAFAFA', fg_color='#FAFAFA', width=300, height=350)
+        self.login_frame.place(x=40, y=40)
+        
+        CTkLabel(self.login_frame, text="Employee Management System",
+                 bg_color='#FAFAFA', text_color='dark blue',
+                 font=('Goudy Old Style', 20, 'bold')).place(x=20, y=20)
+
+        self.username_entry = CTkEntry(self.login_frame, placeholder_text='Enter Your Username',
+                                       width=200, fg_color='#FAFAFA', text_color='dark blue')
+        self.username_entry.place(x=50, y=80)
+
+        self.password_entry = CTkEntry(self.login_frame, placeholder_text='Enter Your Password',
+                                       width=200, show='*', fg_color='#FAFAFA', text_color='dark blue')
+        self.password_entry.place(x=50, y=130)
+
+        CTkButton(self.login_frame, text='Login', cursor='hand2', command=self.login).place(x=70, y=180)
+        CTkButton(self.login_frame, text='Create Account', cursor='hand2', command=lambda: self.switch_callback("signup")).place(x=70, y=230)
+
+    def login(self):
+        username = self.username_entry.get()
+        password = self.password_entry.get()
+        if username == '' or password == '':
+            messagebox.showerror('Error', 'All Fields are required')
+        elif verify_user(username, password):
+            messagebox.showinfo('Success', f'Welcome {username}')
+            self.switch_callback("ems")
+        else:
+            messagebox.showerror('Error', 'Invalid Username or Password')
+
+class SignupScreen(CTkFrame):
+    def __init__(self, master, switch_callback):
+        super().__init__(master, fg_color='#FFFFFF')
+        self.switch_callback = switch_callback
+
+        if os.path.exists("cover.jpg"):
+            try:
+                self.bg_image = CTkImage(Image.open("cover.jpg"), size=(928, 487))
+                CTkLabel(self, image=self.bg_image, text='').place(x=0, y=0)
+            except Exception as e:
+                print("Error loading image:", e)
+        else:
+            self.configure(fg_color="#2E4053")
+
+        # Signup elements
+        self.signup_frame = CTkFrame(self, bg_color='#FAFAFA', fg_color='#FAFAFA', width=300, height=350)
+        self.signup_frame.place(x=40, y=40)
+        
+        CTkLabel(self.signup_frame, text="Create Account",
+                 font=('Goudy Old Style', 24, 'bold'),
+                 text_color='dark blue', bg_color='#FAFAFA').place(x=50, y=20)
+
+        self.username_entry = CTkEntry(self.signup_frame, placeholder_text='Enter Username',
+                                       width=200, fg_color='#FAFAFA', text_color='dark blue')
+        self.username_entry.place(x=50, y=80)
+
+        self.password_entry = CTkEntry(self.signup_frame, placeholder_text='Enter Password',
+                                       width=200, show='*', fg_color="#FDFCFC", text_color='black')
+        self.password_entry.place(x=50, y=130)
+
+        self.signup_button = CTkButton(self.signup_frame, text='Sign Up', cursor='hand2', command=self.create_account)
+        self.signup_button.place(x=70, y=180)
+        CTkButton(self.signup_frame, text='Back to Login', cursor='hand2', command=lambda: self.switch_callback("login")).place(x=70, y=230)
+
+    def create_account(self):
+        u = self.username_entry.get()
+        p = self.password_entry.get()
+        if u == "" or p == "":
+            messagebox.showerror("Error", "Username and Password are required")
+            return
+        try:
+            if save_user(u, p):
+                messagebox.showinfo("Success", "Account Created")
+                self.switch_callback("login")
+            else:
+                messagebox.showerror("Error", "Username already exists!")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+class EmployeeManagementSystem(CTkFrame):
+    def __init__(self, master, logout_callback):
+        super().__init__(master, fg_color='#161C30')
+        self.logout_callback = logout_callback
+
+        if os.path.exists('bg.jpg'):
+            try:
+                self.bg_image = CTkImage(Image.open('bg.jpg'), size=(930, 158))
+                CTkLabel(self, image=self.bg_image, text='').grid(row=0, column=0, columnspan=2, sticky='nsew')
+            except Exception as e:
+                print("Error loading image:", e)
+        
+        self.grid_rowconfigure(1, weight=1)
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_columnconfigure(1, weight=3)
+
+        self.left_frame = CTkFrame(self, fg_color='#161C30')
+        self.left_frame.grid(row=1, column=0, padx=10, pady=10, sticky='nsew')
+        self.left_frame.grid_columnconfigure(1, weight=1)
+
+        self.id_label = CTkLabel(self.left_frame, text='Id', font=('arial', 18, 'bold'), text_color='white')
+        self.id_label.grid(row=0, column=0, padx=(20, 5), pady=5, sticky='w')
+        self.id_entry = CTkEntry(self.left_frame, font=('arial', 15, 'bold'))
+        self.id_entry.grid(row=0, column=1, padx=(5, 20), pady=5, sticky='ew')
+
+        self.name_label = CTkLabel(self.left_frame, text='Name', font=('arial', 18, 'bold'), text_color='white')
+        self.name_label.grid(row=1, column=0, padx=(20, 5), pady=5, sticky='w')
+        self.name_entry = CTkEntry(self.left_frame, font=('arial', 15, 'bold'))
+        self.name_entry.grid(row=1, column=1, padx=(5, 20), pady=5, sticky='ew')
+
+        self.phone_label = CTkLabel(self.left_frame, text='Phone', font=('arial', 18, 'bold'), text_color='white')
+        self.phone_label.grid(row=2, column=0, padx=(20, 5), pady=5, sticky='w')
+        self.phone_entry = CTkEntry(self.left_frame, font=('arial', 15, 'bold'))
+        self.phone_entry.grid(row=2, column=1, padx=(5, 20), pady=5, sticky='ew')
+
+        self.role_label = CTkLabel(self.left_frame, text='Role', font=('arial', 18, 'bold'), text_color='white')
+        self.role_label.grid(row=3, column=0, padx=(20, 5), pady=5, sticky='w')
+        self.role_options = ['Web Developer', 'Cloud Architect', 'Technical Writer', 'Network Engineer', 'Data Scientist', 'Business']
+        self.role_box = CTkComboBox(self.left_frame, values=self.role_options, font=('arial', 15, 'bold'))
+        self.role_box.grid(row=3, column=1, padx=(5, 20), pady=5, sticky='ew')
+
+        self.gender_label = CTkLabel(self.left_frame, text='Gender', font=('arial', 18, 'bold'), text_color='white')
+        self.gender_label.grid(row=4, column=0, padx=(20, 5), pady=5, sticky='w')
+        self.gender_options = ['Male', 'Female']
+        self.gender_box = CTkComboBox(self.left_frame, values=self.gender_options, font=('arial', 15, 'bold'))
+        self.gender_box.grid(row=4, column=1, padx=(5, 20), pady=5, sticky='ew')
+
+        self.salary_label = CTkLabel(self.left_frame, text='Salary', font=('arial', 18, 'bold'), text_color='white')
+        self.salary_label.grid(row=5, column=0, padx=(20, 5), pady=5, sticky='w')
+        self.salary_entry = CTkEntry(self.left_frame, font=('arial', 15, 'bold'))
+        self.salary_entry.grid(row=5, column=1, padx=(5, 20), pady=5, sticky='ew')
+
+        self.right_frame = CTkFrame(self)
+        self.right_frame.grid(row=1, column=1, padx=10, pady=10, sticky='nsew')
+        self.right_frame.grid_columnconfigure(1, weight=1)
+        self.right_frame.grid_rowconfigure(1, weight=1)
+
+        self.search_frame = CTkFrame(self.right_frame, fg_color='transparent')
+        self.search_frame.grid(row=0, column=0, columnspan=4, pady=5, sticky='ew')
+        self.search_frame.grid_columnconfigure(1, weight=1)
+
+        self.search_options = ['Id', 'Name', 'Phone', 'Role', 'Gender', 'Salary']
+        self.search_box = CTkComboBox(self.search_frame, values=self.search_options, state='readonly', width=120)
+        self.search_box.grid(row=0, column=0, padx=5, sticky='w')
+        self.search_box.set('Search By')
+        self.search_entry = CTkEntry(self.search_frame, placeholder_text="Search...")
+        self.search_entry.grid(row=0, column=1, padx=5, sticky='ew')
+
+        CTkButton(self.search_frame, text='Search', command=self.search_employee, width=100).grid(row=0, column=2, padx=5)
+        CTkButton(self.search_frame, text='Show All', command=self.show_all, width=100).grid(row=0, column=3, padx=5)
+
+        self.tree = ttk.Treeview(self.right_frame)
+        self.tree.grid(row=1, column=0, columnspan=4, pady=(0,10), padx=5, sticky='nsew')
+        self.tree['columns'] = ('Id', 'Name', 'Phone', 'Role', 'Gender', 'Salary')
+        for col in self.tree['columns']:
+            self.tree.heading(col, text=col)
+            self.tree.column(col, width=100)
+        
+        self.tree.column('Id', width=80, anchor='center')
+        self.tree.column('Name', width=150)
+        self.tree.column('Phone', width=120)
+        self.tree.column('Role', width=160)
+        self.tree.column('Gender', width=90)
+        self.tree.column('Salary', width=100, anchor='e')
+
+        style = ttk.Style()
+        style.configure('Treeview.Heading', font=('arial', 12, 'bold'))
+        style.configure('Treeview', rowheight=25, font=('arial', 10), background='#D3D3D3', foreground='black')
+        self.tree.bind('<ButtonRelease-1>', self.selection)
+
+        self.button_frame = CTkFrame(self, fg_color='#161C30')
+        self.button_frame.grid(row=2, column=0, columnspan=2, pady=(0, 10))
+        self.button_frame.grid_columnconfigure((0, 1, 2, 3, 4, 5), weight=1)
+
+        CTkButton(self.button_frame, text='New Employee', command=lambda: self.clear(True)).grid(row=0, column=0, padx=5, pady=5)
+        CTkButton(self.button_frame, text='Add Employee', command=self.add_employee).grid(row=0, column=1, padx=5, pady=5)
+        CTkButton(self.button_frame, text='Update Employee', command=self.update_employee).grid(row=0, column=2, padx=5, pady=5)
+        CTkButton(self.button_frame, text='Delete Employee', command=self.delete_employee).grid(row=0, column=3, padx=5, pady=5)
+        CTkButton(self.button_frame, text='Delete All', command=self.delete_all).grid(row=0, column=4, padx=5, pady=5)
+        CTkButton(self.button_frame, text='Logout', command=self.logout_callback).grid(row=0, column=5, padx=5, pady=5)
+
+        self.treeview_data()
+
+    def delete_all(self):
+        if messagebox.askyesno('Confirm', 'Do you really want to delete all records?'):
+            delete_all_employees()
+            self.treeview_data()
+            messagebox.showinfo('Success', 'All records deleted')
+
+    def show_all(self):
+        self.treeview_data()
+        self.search_box.set('Search By')
+        self.search_entry.delete(0, END)
+
+    def search_employee(self):
+        search_term = self.search_entry.get()
+        search_option = self.search_box.get()
+        if search_term == '':
+            messagebox.showerror('Error', 'Enter value to search')
+            return
+        if search_option == 'Search By':
+            messagebox.showerror('Error', 'Please select an option')
+            return
+        results = search_employees(search_option, search_term)
+        self.tree.delete(*self.tree.get_children())
+        for employee in results:
+            self.tree.insert('', END, values=employee)
+
+    def delete_employee(self):
+        selected_item = self.tree.selection()
+        if not selected_item:
+            messagebox.showerror('Error', 'Select an employee to delete')
+            return
+        
+        row_values = self.tree.item(selected_item)['values']
+        employee_id = row_values[0]
+        
+        if messagebox.askyesno('Confirm', f'Are you sure you want to delete employee with ID: {employee_id}?'):
+            delete_employee(employee_id)
+            self.treeview_data()
+            self.clear()
+            messagebox.showinfo('Success', 'Employee deleted')
+
+    def update_employee(self):
+        selected_item = self.tree.selection()
+        if not selected_item:
+            messagebox.showerror('Error', 'Select an employee to update')
+            return
+        
+        employee_id = self.id_entry.get()
+        if not employee_id:
+            messagebox.showerror('Error', 'ID field cannot be empty')
+            return
+
+        update_employee(employee_id, self.name_entry.get(), self.phone_entry.get(), self.role_box.get(), self.gender_box.get(), self.salary_entry.get())
+        self.treeview_data()
+        self.clear()
+        messagebox.showinfo('Success', 'Data updated')
+
+    def selection(self, event):
+        selected_item = self.tree.selection()
+        if selected_item:
+            row = self.tree.item(selected_item)['values']
+            self.clear()
+            self.id_entry.insert(0, row[0])
+            self.name_entry.insert(0, row[1])
+            self.phone_entry.insert(0, row[2])
+            self.role_box.set(row[3])
+            self.gender_box.set(row[4])
+            self.salary_entry.insert(0, row[5])
+
+    def clear(self, value=False):
+        if value:
+            self.tree.selection_remove(self.tree.focus())
+        self.id_entry.delete(0, END)
+        self.name_entry.delete(0, END)
+        self.phone_entry.delete(0, END)
+        self.role_box.set('Web Developer')
+        self.gender_box.set('Male')
+        self.salary_entry.delete(0, END)
+
+    def treeview_data(self):
+        employees = fetch_employees()
+        self.tree.delete(*self.tree.get_children())
+        for employee in employees:
+            self.tree.insert('', END, values=employee)
+
+    def add_employee(self):
+        employee_id = self.id_entry.get()
+        employee_name = self.name_entry.get()
+        employee_phone = self.phone_entry.get()
+        employee_salary = self.salary_entry.get()
+        employee_role = self.role_box.get()
+        employee_gender = self.gender_box.get()
+
+        if not all([employee_id, employee_name, employee_phone, employee_salary]):
+            messagebox.showerror('Error', 'All fields are required')
+            return
+        
+        if employee_id_exists(employee_id):
+            messagebox.showerror('Error', 'Id already exists')
+            return
+
+        if not employee_id.startswith('EMP'):
+            messagebox.showerror('Error', "Invalid ID format. Use 'EMP' followed by a number (e.g,'EMP1').")
+            return
+        
+        insert_employee(employee_id, employee_name, employee_phone, employee_role, employee_gender, employee_salary)
+        self.treeview_data()
+        self.clear()
+        messagebox.showinfo('Success', 'Employee added')
+
+# Main application logic
+class App(CTk):
+    def __init__(self):
+        super().__init__()
+        self.title('Employee Management System')
+        self.geometry('928x487')
+        self.resizable(False, False)
+        
+        # Connect to the database
+        if not connect_database():
+            sys.exit()
+
+        self.current_frame = None
+        self.switch_frame("login")
+
+    def switch_frame(self, frame_name):
+        if self.current_frame:
+            self.current_frame.destroy()
+        
+        if frame_name == "login":
+            self.current_frame = LoginScreen(self, self.switch_frame)
+        elif frame_name == "signup":
+            self.current_frame = SignupScreen(self, self.switch_frame)
+        elif frame_name == "ems":
+            self.current_frame = EmployeeManagementSystem(self, lambda: self.switch_frame("login"))
+        
+        self.current_frame.pack(fill="both", expand=True)
+
+if __name__ == "__main__":
+    app = App()
+    app.mainloop()
